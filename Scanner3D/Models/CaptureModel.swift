@@ -4,7 +4,7 @@ import SwiftUI
 import Combine
 
 /// State of the scanning and photogrammetry process
-enum AppScanState {
+enum AppScanState: Equatable {
     case ready
     case scanning
     case finishingScan
@@ -22,7 +22,7 @@ class CaptureModel: ObservableObject {
     private var scanDirectory: URL?
     private var imagesDirectory: URL?
     private var outputModelURL: URL?
-    private var cancellables = Set<AnyCancellable>()
+    private var stateUpdatesTask: Task<Void, Never>?
     private var photogrammetrySession: PhotogrammetrySession?
 
     init() {
@@ -74,11 +74,10 @@ class CaptureModel: ObservableObject {
     }
 
     private func observeSession(_ session: ObjectCaptureSession) {
-        cancellables.removeAll()
+        stateUpdatesTask?.cancel()
 
-        session.statePublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] state in
+        stateUpdatesTask = Task { [weak self] in
+            for await state in session.stateUpdates {
                 guard let self = self else { return }
                 switch state {
                 case .completed:
@@ -89,7 +88,7 @@ class CaptureModel: ObservableObject {
                     break
                 }
             }
-            .store(in: &cancellables)
+        }
     }
 
     /// Signals the capture session to finalize photos and start 3D reconstruction
@@ -101,6 +100,8 @@ class CaptureModel: ObservableObject {
 
     /// Cancels the scan and cleans up resources
     func cancelScan() {
+        stateUpdatesTask?.cancel()
+        stateUpdatesTask = nil
         session?.cancel()
         session = nil
         photogrammetrySession?.cancel()
@@ -126,7 +127,7 @@ class CaptureModel: ObservableObject {
                 let pSession = try PhotogrammetrySession(input: imagesDir, configuration: configuration)
                 self.photogrammetrySession = pSession
 
-                // Request USDZ generation at reduced or medium detail for on-device speed
+                // Request USDZ generation at reduced detail for on-device processing
                 try pSession.process(requests: [
                     .modelFile(url: outputURL, detail: .reduced)
                 ])

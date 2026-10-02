@@ -7,10 +7,15 @@ struct ScannedItem: Identifiable {
     let date: Date
 }
 
+struct IdentifiableURL: Identifiable {
+    var id: String { url.absoluteString }
+    let url: URL
+}
+
 struct ContentView: View {
     @StateObject private var model = CaptureModel()
     @State private var isScanning = false
-    @State private var previewModelURL: URL?
+    @State private var previewItem: IdentifiableURL?
     @State private var pastScans: [ScannedItem] = []
 
     var body: some View {
@@ -86,7 +91,7 @@ struct ContentView: View {
                         List {
                             ForEach(pastScans) { item in
                                 Button(action: {
-                                    previewModelURL = item.url
+                                    previewItem = IdentifiableURL(url: item.url)
                                 }) {
                                     HStack {
                                         Image(systemName: "arkit")
@@ -119,13 +124,13 @@ struct ContentView: View {
             .fullScreenCover(isPresented: $isScanning) {
                 CaptureOverlayView(model: model)
             }
-            .sheet(item: $previewModelURL) { url in
-                ModelPreviewView(modelURL: url)
+            .sheet(item: $previewItem) { item in
+                ModelPreviewView(modelURL: item.url)
             }
-            .onChange(of: model.scanState) { newState in
+            .onChange(of: model.scanState) { _, newState in
                 if case .completed(let url) = newState {
                     isScanning = false
-                    previewModelURL = url
+                    previewItem = IdentifiableURL(url: url)
                     loadSavedScans()
                 }
             }
@@ -163,9 +168,4 @@ struct ContentView: View {
         }
         pastScans.remove(atOffsets: offsets)
     }
-}
-
-// Helper to make URL Identifiable for SwiftUI sheets
-extension URL: Identifiable {
-    public var id: String { absoluteString }
 }
