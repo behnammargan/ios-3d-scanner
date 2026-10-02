@@ -17,6 +17,7 @@ enum AppScanState: Equatable {
 class CaptureModel: ObservableObject {
     @Published var scanState: AppScanState = .ready
     @Published var session: ObjectCaptureSession?
+    @Published var sessionState: ObjectCaptureSession.CaptureState = .initializing
     @Published var reconstructionProgress: Double = 0.0
 
     private var scanDirectory: URL?
@@ -64,6 +65,7 @@ class CaptureModel: ObservableObject {
         // Initialize ObjectCaptureSession
         let newSession = ObjectCaptureSession()
         self.session = newSession
+        self.sessionState = .initializing
 
         // Observe session state
         observeSession(newSession)
@@ -79,6 +81,7 @@ class CaptureModel: ObservableObject {
         stateUpdatesTask = Task { [weak self] in
             for await state in session.stateUpdates {
                 guard let self = self else { return }
+                self.sessionState = state
                 switch state {
                 case .completed:
                     self.finishScanningAndReconstruct()
@@ -91,9 +94,24 @@ class CaptureModel: ObservableObject {
         }
     }
 
+    /// Starts detecting bounding box around object on horizontal surface
+    func startDetecting() {
+        guard let session = session else { return }
+        let success = session.startDetecting()
+        if !success {
+            print("Waiting for horizontal plane...")
+        }
+    }
+
+    /// Starts capturing photos & depth while moving around the object
+    func startCapturing() {
+        guard let session = session else { return }
+        session.startCapturing()
+    }
+
     /// Signals the capture session to finalize photos and start 3D reconstruction
     func userRequestsFinish() {
-        guard let session = session, session.state == .capturing else { return }
+        guard let session = session else { return }
         scanState = .finishingScan
         session.finish()
     }
@@ -113,6 +131,13 @@ class CaptureModel: ObservableObject {
     private func finishScanningAndReconstruct() {
         guard let imagesDir = imagesDirectory, let outputURL = outputModelURL else {
             scanState = .failed(message: "Missing image directory for reconstruction.")
+            return
+        }
+
+        // Verify photos were actually captured
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: imagesDir.path)) ?? []
+        guard !files.isEmpty else {
+            scanState = .failed(message: "No photos were captured. Make sure to tap 'Start 3D Scan' and orbit around the object before tapping Finish.")
             return
         }
 
